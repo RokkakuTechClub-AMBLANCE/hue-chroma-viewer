@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>色相・彩度分離ビューア</title>
+<style>
+  :root{
+    --bg:#8a8a8a;            /* 評価用の中間グレー環境 */
+    --panel:#7d7d7d;
+    --ink:#1c1c1c;
+    --ink-soft:#333;
+    --paper:#f2f0ec;
+    --accent:#1c1c1c;
+    --gap:14px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic","Meiryo",sans-serif;
+    min-height:100vh;
+    padding:28px clamp(16px, 4vw, 48px) 80px;
+  }
+  header{
+    display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+    margin-bottom:6px;
+  }
+  h1{
+    font-size:20px; font-weight:700; letter-spacing:.08em;
+  }
+  h1 .sub{
+    font-size:12px; font-weight:400; letter-spacing:.12em; color:var(--ink-soft);
+    margin-left:10px;
+  }
+  .note{
+    font-size:12px; color:#2a2a2a; letter-spacing:.03em; line-height:1.7;
+    margin-bottom:20px; max-width:72em;
+  }
+  /* ---- controls ---- */
+  .controls{
+    display:flex; align-items:center; gap:22px; flex-wrap:wrap;
+    background:rgba(0,0,0,.10);
+    border:1px solid rgba(0,0,0,.18);
+    border-radius:6px;
+    padding:12px 16px;
+    margin-bottom:22px;
+  }
+  .lctl{display:flex; align-items:center; gap:10px;}
+  .lctl label{font-size:12px; letter-spacing:.06em; white-space:nowrap;}
+  /* L slider: OKLCh の明度ランプそのものをトラックにする */
+  input[type=range]{
+    -webkit-appearance:none; appearance:none;
+    width:220px; height:14px; border-radius:7px;
+    background:linear-gradient(to right,#333,#5c5c5c,#8a8a8a,#bcbcbc,#e8e8e8);
+    border:1px solid rgba(0,0,0,.35);
+    outline:none; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%;
+    background:var(--paper); border:2px solid var(--ink);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px; height:16px; border-radius:50%;
+    background:var(--paper); border:2px solid var(--ink);
+  }
+  input[type=range]:focus-visible{outline:2px solid #fff; outline-offset:2px;}
+  .lval{font-variant-numeric:tabular-nums; font-size:13px; min-width:4.5em;}
+  .hint{font-size:11px; color:#2e2e2e;}
+  /* ---- drop zone ---- */
+  #drop{
+    border:2px dashed rgba(0,0,0,.45);
+    border-radius:8px;
+    padding:44px 20px;
+    text-align:center;
+    font-size:14px; letter-spacing:.05em;
+    color:#222;
+    cursor:pointer;
+    transition:background .15s, border-color .15s;
+    margin-bottom:26px;
+  }
+  #drop.over{background:rgba(255,255,255,.22); border-color:#111;}
+  #drop input{display:none;}
+  #drop .big{font-size:16px; font-weight:600; display:block; margin-bottom:6px;}
+  /* ---- rows ---- */
+  .row{
+    background:var(--panel);
+    border:1px solid rgba(0,0,0,.22);
+    border-radius:6px;
+    padding:14px 14px 12px;
+    margin-bottom:26px;
+  }
+  .row canvas{display:block; width:100%; height:auto; border-radius:2px;}
+  .labels{
+    display:flex; gap:0; margin-top:8px;
+  }
+  .labels span{
+    flex:1; text-align:center;
+    font-size:11px; letter-spacing:.14em; color:#222;
+  }
+  .rowbar{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin-top:12px;
+  }
+  .fname{
+    font-size:12px; color:#1e1e1e; margin-right:auto;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:40%;
+  }
+  button{
+    font:inherit; font-size:12px; letter-spacing:.05em;
+    padding:6px 14px;
+    background:var(--paper); color:var(--ink);
+    border:1px solid var(--ink);
+    border-radius:4px; cursor:pointer;
+  }
+  button:hover{background:#fff;}
+  button:focus-visible{outline:2px solid #fff; outline-offset:2px;}
+  button.ghost{background:transparent; border-color:rgba(0,0,0,.5); color:#1a1a1a;}
+  button.ghost:hover{background:rgba(255,255,255,.18);}
+  #err{
+    color:#5a0000; background:#e8c8c8; border:1px solid #a05050;
+    padding:10px 14px; border-radius:4px; font-size:13px;
+    margin-bottom:20px; display:none;
+  }
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>色相・彩度分離ビューア<span class="sub">OKLCh — 輝度 / 色度 / 元画像</span></h1>
+</header>
+<p class="note">
+  左：輝度グレースケール（Rec.601 加重 — クリスタと同様、色相の違いが明度差として含まれる）。
+  中央：OKLCh で L を固定し C（彩度）と H（色相）だけを残した色度マップ。輝度定数化と違い、黄が沈み青が浮くバイアスがありません。
+  右：元画像。色域外の色は C を縮めて収めています（色相は保存）。
+</p>
+
+<div id="err"></div>
+
+<div class="controls">
+  <div class="lctl">
+    <label for="lslider">色度マップの固定 L</label>
+    <input type="range" id="lslider" min="0.40" max="0.92" step="0.01" value="0.74">
+    <span class="lval" id="lval">L = 0.74</span>
+  </div>
+  <span class="hint">L を上げると明るい紙面で、下げると暗い紙面で色相を観察できます（低 L ほど高彩度まで表示可能な色相が変わります）</span>
+</div>
+
+<div id="drop">
+  <span class="big">PNG / JPG をここにドロップ</span>
+  クリックして選択もできます・複数枚まとめて可
+  <input type="file" id="file" accept="image/*" multiple>
+</div>
+
+<div id="rows"></div>
+
+<script>
+(function(){
+  const errBox = document.getElementById('err');
+  function showErr(msg){ errBox.textContent = msg; errBox.style.display = 'block'; }
+
+  /* ---------- WebGL setup (共有コンテキスト) ---------- */
+  const glCanvas = document.createElement('canvas');
+  const gl = glCanvas.getContext('webgl', {premultipliedAlpha:false, preserveDrawingBuffer:false});
+  if(!gl){ showErr('WebGL を初期化できませんでした。ブラウザの設定をご確認ください。'); return; }
+  const MAX_DIM = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 4096);
+
+  const VS = `
+    attribute vec2 p;
+    varying vec2 uv;
+    void main(){ uv = vec2(p.x*0.5+0.5, 0.5-p.y*0.5); gl_Position = vec4(p,0.,1.); }
+  `;
+  const FS = `
+    precision highp float;
+    uniform sampler2D tex;
+    uniform int mode;      /* 0: 輝度GS  1: 色度マップ  2: 元画像 */
+    uniform float fixedL;
+    varying vec2 uv;
+
+    vec3 s2l(vec3 c){
+      return mix(c/12.92, pow((c+0.055)/1.055, vec3(2.4)), step(vec3(0.04045), c));
+    }
+    vec3 l2s(vec3 c){
+      c = clamp(c, 0.0, 1.0);
+      return mix(c*12.92, 1.055*pow(c, vec3(1.0/2.4))-0.055, step(vec3(0.0031308), c));
+    }
+    vec3 lin2oklab(vec3 c){
+      float l = dot(c, vec3(0.4122214708, 0.5363325363, 0.0514459929));
+      float m = dot(c, vec3(0.2119034982, 0.6806995451, 0.1073969566));
+      float s = dot(c, vec3(0.0883024619, 0.2817188376, 0.6299787005));
+      l = pow(max(l,0.0), 1.0/3.0);
+      m = pow(max(m,0.0), 1.0/3.0);
+      s = pow(max(s,0.0), 1.0/3.0);
+      return vec3(
+        0.2104542553*l + 0.7936177850*m - 0.0040720468*s,
+        1.9779984951*l - 2.4285922050*m + 0.4505937099*s,
+        0.0259040371*l + 0.7827717662*m - 0.8086757660*s);
+    }
+    vec3 oklab2lin(vec3 lab){
+      float l = lab.x + 0.3963377774*lab.y + 0.2158037573*lab.z;
+      float m = lab.x - 0.1055613458*lab.y - 0.0638541728*lab.z;
+      float s = lab.x - 0.0894841775*lab.y - 1.2914855480*lab.z;
+      l = l*l*l; m = m*m*m; s = s*s*s;
+      return vec3(
+         4.0767416621*l - 3.3077115913*m + 0.2309699292*s,
+        -1.2684380046*l + 2.6097574011*m - 0.3413193965*s,
+        -0.0041960863*l - 0.7034186147*m + 1.7076147010*s);
+    }
+    bool inGamut(vec3 c){
+      return all(greaterThanEqual(c, vec3(-0.0005))) && all(lessThanEqual(c, vec3(1.0005)));
+    }
+
+    void main(){
+      vec4 t = texture2D(tex, uv);
+      vec3 c = mix(vec3(1.0), t.rgb, t.a);   /* 透明部は白紙合成 */
+
+      if(mode == 2){
+        gl_FragColor = vec4(c, 1.0); return;
+      }
+      if(mode == 0){
+        float y = dot(c, vec3(0.299, 0.587, 0.114));
+        gl_FragColor = vec4(vec3(y), 1.0); return;
+      }
+      /* mode 1: 色度マップ */
+      vec3 lab = lin2oklab(s2l(c));
+      float C = length(lab.yz);
+      if(C < 1e-5){
+        gl_FragColor = vec4(l2s(oklab2lin(vec3(fixedL, 0.0, 0.0))), 1.0); return;
+      }
+      vec2 dir = lab.yz / C;
+      vec3 lin = oklab2lin(vec3(fixedL, dir*C));
+      if(!inGamut(lin)){
+        float lo = 0.0, hi = C;
+        for(int i=0;i<12;i++){
+          float mid = (lo+hi)*0.5;
+          if(inGamut(oklab2lin(vec3(fixedL, dir*mid)))) lo = mid; else hi = mid;
+        }
+        lin = oklab2lin(vec3(fixedL, dir*lo));
+      }
+      gl_FragColor = vec4(l2s(lin), 1.0);
+    }
+  `;
+
+  function compile(type, src){
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){ showErr('シェーダの初期化に失敗しました。'); return; }
+  gl.useProgram(prog);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const locP = gl.getAttribLocation(prog, 'p');
+  gl.enableVertexAttribArray(locP);
+  gl.vertexAttribPointer(locP, 2, gl.FLOAT, false, 0, 0);
+  const uMode = gl.getUniformLocation(prog, 'mode');
+  const uL    = gl.getUniformLocation(prog, 'fixedL');
+
+  function makeTexture(bitmap){
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); /* ImageBitmap には無視されるフラグ。向きは頂点シェーダの UV 反転で一元管理 */
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  /* mode を指定して 1 パネル分レンダリングし、compose キャンバスへ転写 */
+  function renderPanel(row, mode, destX){
+    glCanvas.width = row.w; glCanvas.height = row.h;
+    gl.viewport(0, 0, row.w, row.h);
+    gl.bindTexture(gl.TEXTURE_2D, row.tex);
+    gl.uniform1i(uMode, mode);
+    gl.uniform1f(uL, currentL);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    row.ctx.drawImage(glCanvas, destX, 0);
+  }
+
+  /* ---------- rows ---------- */
+  const rowsEl = document.getElementById('rows');
+  const rows = [];
+  let currentL = 0.74;
+  const MODES = [
+    {mode:0, label:'輝度（グレースケール）', suffix:'_luma'},
+    {mode:1, label:'色相・彩度（L 固定）',   suffix:'_chroma-hue'},
+    {mode:2, label:'元画像',                suffix:'_original'},
+  ];
+
+  async function addImage(file){
+    let bitmap;
+    try{
+      bitmap = await createImageBitmap(file);
+    }catch(e){
+      showErr(`「${file.name}」を画像として読み込めませんでした。`); return;
+    }
+    let w = bitmap.width, h = bitmap.height;
+    if(Math.max(w, h) > MAX_DIM){
+      const k = MAX_DIM / Math.max(w, h);
+      const nw = Math.round(w*k), nh = Math.round(h*k);
+      bitmap = await createImageBitmap(bitmap, {resizeWidth:nw, resizeHeight:nh, resizeQuality:'high'});
+      w = nw; h = nh;
+    }
+
+    const gap = Math.max(8, Math.round(w * 0.012));
+    const compose = document.createElement('canvas');
+    compose.width  = w*3 + gap*2;
+    compose.height = h;
+    const ctx = compose.getContext('2d');
+    ctx.fillStyle = '#808080';               /* 仕切りも 50% グレー */
+    ctx.fillRect(0, 0, compose.width, compose.height);
+
+    const row = {
+      tex: makeTexture(bitmap), w, h, gap,
+      canvas: compose, ctx,
+      base: file.name.replace(/\.[^.]+$/, '') || 'image',
+    };
+    bitmap.close && bitmap.close();
+    rows.push(row);
+
+    for(let i=0;i<3;i++) renderPanel(row, MODES[i].mode, i*(w+gap));
+
+    /* DOM */
+    const div = document.createElement('div');
+    div.className = 'row';
+    div.appendChild(compose);
+
+    const labels = document.createElement('div');
+    labels.className = 'labels';
+    MODES.forEach(m => {
+      const s = document.createElement('span');
+      s.textContent = m.label;
+      labels.appendChild(s);
+    });
+    div.appendChild(labels);
+
+    const bar = document.createElement('div');
+    bar.className = 'rowbar';
+    const fn = document.createElement('span');
+    fn.className = 'fname';
+    fn.textContent = file.name;
+    bar.appendChild(fn);
+
+    const dlAll = document.createElement('button');
+    dlAll.textContent = '3面まとめて保存';
+    dlAll.addEventListener('click', () => downloadCanvas(row.canvas, row.base + '_analysis.png'));
+    bar.appendChild(dlAll);
+
+    MODES.forEach((m, i) => {
+      const b = document.createElement('button');
+      b.className = 'ghost';
+      b.textContent = m.label.split('（')[0] + 'のみ';
+      b.addEventListener('click', () => {
+        const c = document.createElement('canvas');
+        c.width = row.w; c.height = row.h;
+        c.getContext('2d').drawImage(row.canvas, i*(row.w+row.gap), 0, row.w, row.h, 0, 0, row.w, row.h);
+        downloadCanvas(c, row.base + m.suffix + '.png');
+      });
+      bar.appendChild(b);
+    });
+    div.appendChild(bar);
+    rowsEl.prepend(div);
+  }
+
+  function downloadCanvas(canvas, name){
+    canvas.toBlob(blob => {
+      if(!blob){ showErr('PNG の書き出しに失敗しました。'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }, 'image/png');
+  }
+
+  /* ---------- L slider ---------- */
+  const slider = document.getElementById('lslider');
+  const lval = document.getElementById('lval');
+  let raf = 0;
+  slider.addEventListener('input', () => {
+    currentL = parseFloat(slider.value);
+    lval.textContent = 'L = ' + currentL.toFixed(2);
+    if(raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      rows.forEach(r => renderPanel(r, 1, r.w + r.gap));  /* 中央パネルのみ再描画 */
+    });
+  });
+
+  /* ---------- drop zone ---------- */
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('file');
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('keydown', e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); } });
+  drop.tabIndex = 0;
+  fileInput.addEventListener('change', () => {
+    [...fileInput.files].forEach(addImage);
+    fileInput.value = '';
+  });
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); drop.classList.add('over');
+  }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); drop.classList.remove('over');
+  }));
+  drop.addEventListener('drop', e => {
+    errBox.style.display = 'none';
+    [...e.dataTransfer.files].filter(f => f.type.startsWith('image/')).forEach(addImage);
+  });
+  /* ページ全体へのドロップで誤ってブラウザが画像を開くのを防止 */
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
